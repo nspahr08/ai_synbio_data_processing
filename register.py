@@ -21,14 +21,15 @@ def register_people(engine, first_name, last_name, email, lab_id):
     people_df.to_sql('people', engine, index=False, if_exists='append')
 
 
-def register_protocol(engine, id, description, filename):
+def register_protocol(engine, protocol_name, description, filename):
     protocol_dict = {
-        'id': [id],
+        'id': [protocol_name],
         'description': [description],
         'filename': [filename]
     }
     protocol_df = pd.DataFrame.from_dict(protocol_dict)
     protocol_df.to_sql('protocol', engine, index=False, if_exists='append')
+    return protocol_name
 
 
 def register_strain(engine, long_name, short_name, parent_strain=None):
@@ -83,6 +84,8 @@ def register_operation(engine, op_id, protocol_id, lab_id, contact_id, timestamp
     }
     operation_df = pd.DataFrame.from_dict(operation_dict)
     operation_df.to_sql('operation', engine, index=False, if_exists='append')
+    
+    return op_id
 
 
 def register_experiment(engine, experiment_id, exp_type, start_date, exp_index, description, op_id):
@@ -112,3 +115,33 @@ def register_sample(engine, name, experiment_id, plate, well, growth_condition_i
     }
     new_sample_df = pd.DataFrame.from_dict(sample_dict)
     new_sample_df.to_sql('sample', engine, index=False, if_exists='append')
+
+
+def register_sample(engine, name, experiment_id, plate, well, growth_condition_id, strain_id, replicate, passage, parent_sample, innoculation_timestamp):
+    sample_dict = {
+        'name': [name],
+        'experiment_id': [experiment_id],
+        'plate': [plate],
+        'well': [well],
+        'growth_condition_id': [growth_condition_id],
+        'strain_id': [strain_id],
+        'replicate': [replicate],
+        'passage': [passage],
+        'parent_sample': [parent_sample],
+        'innoculation_timestamp': [innoculation_timestamp]
+    }
+    new_sample_df = pd.DataFrame.from_dict(sample_dict)
+    new_sample_df.to_sql('sample', engine, index=False, if_exists='append')
+
+
+def register_measurement(engine, sample_id, operation_id, measurement_type, filename):
+    measurement_dict = {
+        'sample_id': [sample_id],
+        'operation_id': [operation_id],
+        'type': [measurement_type],
+        'filename': [filename]
+    }
+    new_measurement_df = pd.DataFrame.from_dict(measurement_dict)
+    new_measurement_df.to_sql('measurement', engine, index=False, if_exists='append')
+
+ 
