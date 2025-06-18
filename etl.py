@@ -8,6 +8,7 @@ from datetime import datetime
 from datetime import timedelta
 from amiga.libs.growth import GrowthPlate
 from amiga.libs.model import GrowthModel
+from utilities import read_mio_csv
 
 def etl(engine, mio):
     '''
@@ -36,21 +37,6 @@ def etl(engine, mio):
         plate_reader_files = [fn for fn in filenames if re.match(regexpattern, fn)]
         
         return plate_reader_files
-    
-    
-    def load_layout(minio_bucket_name, layout_file_path):
-        # Read plate layout file.
-        try:
-            response = mio.get_object(minio_bucket_name, layout_file_path)
-            csv_data = response.data
-            df = pd.read_csv(io.BytesIO(csv_data), header=None)
-        except Exception as e:
-            print(f"Error: {e}")
-            df = None
-        finally:
-            response.close()
-            response.release_conn()
-            return df
     
     
     def get_transfers(batch_dict, batch, plate, transfer):
@@ -109,17 +95,17 @@ def etl(engine, mio):
     plate_reader_filenames = get_plate_reader_filenames(
         minio_bucket_name, path_to_plate_reader_files, fname_pattern
         )
-    transfer_layout = load_layout(
-        minio_bucket_name, path_to_layout_files + 'transfer_layout.csv'
+    transfer_layout = read_mio_csv(
+        mio, minio_bucket_name, path_to_layout_files + 'transfer_layout.csv'
         )
-    rep_layout = load_layout(
-        minio_bucket_name, path_to_layout_files + 'replicate_layout.csv'
+    rep_layout = read_mio_csv(
+        mio, minio_bucket_name, path_to_layout_files + 'replicate_layout.csv'
         )
-    strain_layout = load_layout(
-        minio_bucket_name, path_to_layout_files + 'strain_layout.csv'
+    strain_layout = read_mio_csv(
+        mio, minio_bucket_name, path_to_layout_files + 'strain_layout.csv'
         )
-    gc_layout = load_layout(
-        minio_bucket_name, path_to_layout_files + 'growth_condition_layout.csv'
+    gc_layout = read_mio_csv(
+        mio, minio_bucket_name, path_to_layout_files + 'growth_condition_layout.csv'
         )
     
     
@@ -601,6 +587,62 @@ def query_OD(engine, experiment_id, strain_id):
     return selection
 
 
+def query_all_OD(engine, strain_id):
+    '''
+    Queries db for all samples from specified strain and returns all 
+    associated od_measurements as pandas DataFrame. Plots all samples of
+    specified strain_id.
+
+    Args:
+        experiment_id (str): Experiment id. Must be in db.
+        strain_id (str): Strain id. Must be in db.
+    Returns:
+        DataFrame    
+    '''
+    
+
+    # # Hardcode experiment id. To be changed later
+    # experiment_id = 'ALE1b'
+
+    db_strains = pd.read_sql(
+        "SELECT strain.id FROM strain", engine
+    )['id'].to_list()
+
+    if strain_id not in db_strains:
+        print(f"Check if strain is registered in the db.")
+        
+        return None
+        
+    # Hardcoded query. This can be made more flexible later.
+    query = """
+    SELECT 
+        sample.experiment_id, sample.name, sample.replicate, sample.passage, 
+        sample.strain_id, strain.long_name,
+        sample.growth_condition_id, growth_condition.carbon_source,
+        measurement.type,
+        od_measurement.timepoint, od_measurement.od, od_measurement.background
+    FROM 
+        sample
+        INNER JOIN measurement ON measurement.sample_id = sample.name
+        INNER JOIN od_measurement ON od_measurement.measurement_id = measurement.id
+        INNER JOIN strain ON strain.id = sample.strain_id
+        INNER JOIN growth_condition ON growth_condition.id = sample.growth_condition_id
+        
+    WHERE 
+        (sample.strain_id=%(strain)s)
+    """
+    
+    selection = pd.read_sql(
+        query, engine, params={'strain': str(strain_id)}
+    ).rename(
+        columns={'experiment_id': 'experiment_id',
+                 'name': 'sample_name',
+                 'type': 'measurement_type',
+                 'long_name':'strain_name'}
+    )
+
+    return selection
+    
 def query_growth_rate(engine, experiment_id, strain_id):
     '''
     Queries db for all samples from specified experiment and returns all 
@@ -947,21 +989,6 @@ def etl_ALE1a(engine, mio):
         return plate_reader_files
     
     
-    def load_layout(minio_bucket_name, layout_file_path):
-        # Read plate layout file.
-        try:
-            response = mio.get_object(minio_bucket_name, layout_file_path)
-            csv_data = response.data
-            df = pd.read_csv(io.BytesIO(csv_data), header=None)
-        except Exception as e:
-            print(f"Error: {e}")
-            df = None
-        finally:
-            response.close()
-            response.release_conn()
-            return df
-    
-    
     def get_transfers(batch_dict, batch, plate, transfer):
         # Which transfer since beginning of experiment?
         return batch_dict[batch] + (plate-1)*3 + (transfer)
@@ -1018,17 +1045,17 @@ def etl_ALE1a(engine, mio):
     plate_reader_filenames = get_plate_reader_filenames(
         minio_bucket_name, path_to_plate_reader_files, fname_pattern
         )
-    transfer_layout = load_layout(
-        minio_bucket_name, path_to_layout_files + 'transfer_layout.csv'
+    transfer_layout = read_mio_csv(
+        mio, minio_bucket_name, path_to_layout_files + 'transfer_layout.csv'
         )
-    rep_layout = load_layout(
-        minio_bucket_name, path_to_layout_files + 'replicate_layout.csv'
+    rep_layout = read_mio_csv(
+        mio, minio_bucket_name, path_to_layout_files + 'replicate_layout.csv'
         )
-    strain_layout = load_layout(
-        minio_bucket_name, path_to_layout_files + 'strain_layout.csv'
+    strain_layout = read_mio_csv(
+        mio, minio_bucket_name, path_to_layout_files + 'strain_layout.csv'
         )
-    gc_layout = load_layout(
-        minio_bucket_name, path_to_layout_files + 'growth_condition_layout.csv'
+    gc_layout = read_mio_csv(
+        mio, minio_bucket_name, path_to_layout_files + 'growth_condition_layout.csv'
         )
     
     # Upload this experiment and its operation (i.e., procedure) to the db.

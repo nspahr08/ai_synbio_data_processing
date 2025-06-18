@@ -32,10 +32,11 @@ def register_protocol(engine, protocol_name, description, filename):
     return protocol_name
 
 
-def register_strain(engine, long_name, short_name, parent_strain=None):
+def register_strain(engine, long_name, short_name, culture = None, parent_strain=None):
     strain_dict = {
         'long_name': [long_name],
         'short_name': [short_name],
+        'culture': [culture],
         'parent_strain_id': [parent_strain]
     }
     strain_df = pd.DataFrame.from_dict(strain_dict)
@@ -144,4 +145,7 @@ def register_measurement(engine, sample_id, operation_id, measurement_type, file
     new_measurement_df = pd.DataFrame.from_dict(measurement_dict)
     new_measurement_df.to_sql('measurement', engine, index=False, if_exists='append')
 
- 
+
+def register(engine, table, value_dict):
+    df = pd.Series(value_dict).to_frame().T
+    df.to_sql(table, engine, index=False, if_exists='append')
