@@ -11,7 +11,13 @@ import numpy as np
 from amiga.libs.growth import GrowthPlate
 from amiga.libs.model import GrowthModel
 
-def extract_from_robotic_ALE(path_to_data: str = None, minio_config: dict = None, minio_path_to_data: str = None, exp_meta: dict = None):
+def extract_from_robotic_ALE(
+    path_to_data: str = None,
+    minio_config: dict = None, 
+    minio_path_to_data: str = None,
+    exp_meta: dict = None,
+    fname_pattern = r'(?P<experiment>\w+)_(?P<timestamp>\d+)_(?P<uniqueID>\w+)_(?P<series>\w+)_(?P<transfer>\d+)_(?P<timepoint>\d+).txt'
+):
     """
     Extracts data from robotic ALE experiments.
     
@@ -34,10 +40,8 @@ def extract_from_robotic_ALE(path_to_data: str = None, minio_config: dict = None
     data = pd.DataFrame()
     
     # Define file pattern for plate reader files
-    fname_pattern = re.compile(
-        r'(?P<experiment>\w+)_(?P<timestamp>\d+)_(?P<uniqueID>\w+)_(?P<plate>\d+)_(?P<transfer>[1-3])_(?P<timepoint>\d+).txt'
-    )
-    
+    fname_pattern = re.compile(fname_pattern)
+
     # Get list of files based on source
     if path_to_data is not None:
         files = list_local_files(path_to_data, pattern=fname_pattern)
@@ -46,6 +50,9 @@ def extract_from_robotic_ALE(path_to_data: str = None, minio_config: dict = None
     else:
         raise ValueError("Either path_to_data or both minio_config and minio_path_to_data must be provided")
 
+    if len(files) == 0:
+        print('No files matching specified file name pattern.')
+        return None
     
     # Read info from plate reader file names and file content into df
     for f in files:
@@ -54,10 +61,11 @@ def extract_from_robotic_ALE(path_to_data: str = None, minio_config: dict = None
         match = fname_pattern.match(os.path.basename(f))
         
         # Parse info contained in plate reader file name
-        data_row['experiment'] = exp_meta['experiment_id'] if exp_meta else str(match.group('experiment'))
+        data_row['experiment'] = exp_meta['experiment_id'] if exp_meta else str(match.group('experiment')) 
         data_row['file_ID'] = str(match.group('uniqueID'))
         data_row['timestamp'] = int(match.group('timestamp'))
-        data_row['plate_index'] = int(match.group('plate'))
+        data_row['series'] = str(match.group('series'))
+        data_row['plate_index'] = int(match.group('transfer'))
         # t_transfer indicates which plate cols were most recently innoculated.
         # data_row['t_transfer'] = int(match.group('transfer'))
         data_row['transfer'] = int(match.group('transfer'))
@@ -78,8 +86,6 @@ def extract_from_robotic_ALE(path_to_data: str = None, minio_config: dict = None
 
     data.reset_index(inplace=True, drop=True)
 
-
-    
     # Translate row and column numbers to well names
     data['well'] = data.apply(
         lambda x: get_well_name(x['row'], x['column']), axis=1
@@ -155,7 +161,7 @@ def map_metadata(df, path_to_metadata: str = None, minio_config: str = None, min
 
 def get_sample_names(df):
     sample_names = 'E:' + df['experiment'] + \
-                  '.P:' + df['plate_index'].astype(str) + \
+                  '.P:' + df['series'] + '-' + df['plate_index'].astype(str) + \
                   '.W:' + df['well'].astype(str) + \
                   '.S:' + df['strain'].astype(str) + \
                   '.C:' + df['gc'].astype(str) + \
@@ -170,7 +176,7 @@ def get_sample_names(df):
 
 def get_plate_names(df):
     df['plate_name'] = (
-        'E:' + df['experiment'] + '.P:' + df['plate_index'].astype(str)
+        'E:' + df['experiment'] + '.P:' + df['series'] + '-' + df['plate_index'].astype(str)
     )
     return df
     
@@ -186,7 +192,7 @@ def get_parent_samples(df, parent_frame = None):
         return df
         
     parent_sample_names = 'E:' + df['experiment'] + \
-                          '.P:' + (df['plate_index'] - 1).astype(str) + \
+                          '.P:' + df['series'] + '-' + (df['plate_index']-1).astype(str) + \
                           '.W:' + df['well'].astype(str) + \
                           '.S:' + df['strain'].astype(str) + \
                           '.C:' + df['gc'].astype(str) + \
@@ -204,14 +210,14 @@ def get_parent_samples(df, parent_frame = None):
     return df
 
 
-def compute_background(df):
+def compute_background(df): #### NOT SURE IF THIS IS CORRECT!!!
     
     # Calculate a background value for each plate reader measurement
     # (based on the wells that only contain media)
     
     df['background'] = pd.NA
     df['background'] = df.groupby(
-        ['experiment', 'plate_index', 'timestamp']
+        ['experiment', 'series', 'plate_index', 'timestamp']
         )['od'].transform(
         lambda x: x[df.loc[x.index, 'strain'].isna()].mean()
         )
@@ -228,7 +234,7 @@ def compute_inoculation(df):
         ~(pd.isna(df['transfer'])),
         'innoculation_timestamp'
         ] = df.groupby(
-            ['plate_index', 'transfer']
+            ['series','plate_index', 'transfer']
             )['datetime'].transform("min")
 
     def calc_timepoint(time_0, time):
@@ -248,7 +254,6 @@ def compute_inoculation(df):
         axis=1
     )
 
-    df.drop
     return df
 
 
@@ -385,21 +390,17 @@ def create_od_measurements(df):
 
     od_measurements = df.loc[~pd.isna(df['sample_name'])][req_cols].reset_index(drop=True)
     od_measurements['operation_id'] = od_measurements['sample_name'] + '_od'
-    od_measurements.rename(
-        columns={'operation_id': 'measurement_id'},
-        inplace=True
-    )
     od_measurements.drop('sample_name', axis=1, inplace=True)
     
     return od_measurements
 
 
 def get_amiga_metrics(df, subtract_background = False):
-    # Given timepoint-od data for a set of samples (measurement_ids)
+    # Given timepoint-od data for a set of samples (operation_ids)
     # calculate growth rate, doubling time, lag time
 
     # Check if df has required columns
-    req_cols = ['measurement_id', 'timepoint', 'od']
+    req_cols = ['operation_id', 'timepoint', 'od']
 
     if not set(req_cols) <= set(df.columns):
         print('df is missing required col(s):', set(req_cols) - set(df.columns))
@@ -421,15 +422,15 @@ def get_amiga_metrics(df, subtract_background = False):
     pivot_data = pd.pivot(df, 
                   index = 'timepoint',
                   values = value,
-                  columns = 'measurement_id'
+                  columns = 'operation_id'
                  ).reset_index(
                  ).rename(columns=({'timepoint':'time'})
                  ).sort_values('time'
                  ).astype(float)
     
     mapping = pd.DataFrame(data = {
-        'm_id':df['measurement_id'].unique(),
-        'plate_ID':['1'] * df['measurement_id'].nunique()
+        'm_id':df['operation_id'].unique(),
+        'plate_ID':['1'] * df['operation_id'].nunique()
     }
                           ).set_index('m_id')
     
@@ -468,7 +469,7 @@ def create_growth_measurements(amiga):
     
     df = amiga.rename(columns={
         'OD_Max': 'max_od',
-        'm_id': 'measurement_id'
+        'm_id': 'operation_id'
     })
     df['lag_time'] = df['lag_time'].replace([np.inf, -np.inf], 10000)
     df['doubling_time'] = df['doubling_time'].replace([np.inf, -np.inf], 10000)

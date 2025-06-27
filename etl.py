@@ -558,16 +558,17 @@ def query_OD(engine, experiment_id, strain_id):
     query = """
     SELECT 
         experiment.id,
-        sample.name, sample.passage, 
+        sample.name, sample.passage, sample.plate,
         sample.strain_id, strain.long_name,
-        sample.growth_condition_id, growth_condition.carbon_source,
+        sample.growth_condition_id, growth_condition.long_name AS gc_name, growth_condition.carbon_source,
         measurement.type,
-        od_measurement.datetime, od_measurement.od, od_measurement.background
+        od_measurement.datetime, od_measurement.timepoint, od_measurement.od, od_measurement.background
     FROM 
         experiment
         INNER JOIN sample ON sample.experiment_id = experiment.id
         INNER JOIN measurement ON measurement.sample_id = sample.name
-        INNER JOIN od_measurement ON od_measurement.measurement_id = measurement.id
+        # INNER JOIN od_measurement ON od_measurement.measurement_id = measurement.id
+        INNER JOIN od_measurement ON od_measurement.operation_id = measurement.operation_id
         INNER JOIN strain ON strain.id = sample.strain_id
         INNER JOIN growth_condition ON growth_condition.id = sample.growth_condition_id
         
@@ -679,18 +680,19 @@ def query_growth_rate(engine, experiment_id, strain_id):
         
     # Hardcoded query. This can be made more flexible later.
     query = """
-    SELECT 
+    SELECT
         experiment.id,
-        sample.name, sample.passage, 
+        sample.name, sample.passage, sample.plate,
         sample.strain_id, strain.long_name,
-        sample.growth_condition_id, growth_condition.carbon_source,
+        sample.growth_condition_id, growth_condition.long_name AS gc_name, growth_condition.carbon_source,
         measurement.type,
         growth_measurement.growth_rate, growth_measurement.doubling_time, growth_measurement.max_od
     FROM 
         experiment
         INNER JOIN sample ON sample.experiment_id = experiment.id
         INNER JOIN measurement ON measurement.sample_id = sample.name
-        INNER JOIN growth_measurement ON growth_measurement.measurement_id = measurement.id
+        # INNER JOIN growth_measurement ON growth_measurement.measurement_id = measurement.id
+        INNER JOIN growth_measurement ON growth_measurement.operation_id = measurement.operation_id
         INNER JOIN strain ON strain.id = sample.strain_id
         INNER JOIN growth_condition ON growth_condition.id = sample.growth_condition_id
         
