@@ -7,6 +7,7 @@ from minio.error import S3Error
 from typing import Dict, Any, Optional, List
 import re
 
+
 def read_mio_csv(mio, minio_bucket_name, file_path):
 
     # Read mio csv.
@@ -23,10 +24,10 @@ def read_mio_csv(mio, minio_bucket_name, file_path):
         return df
 
 
-def del_from_table_where(engine, table, pk, value):
+def del_from_table_where(engine, table, field, value):
 
-    statement = f"DELETE FROM `{table}` WHERE `{pk}` = '{value}';"
-        
+    statement = f"DELETE FROM `{table}` WHERE `{field}` = '{value}';"
+
     with engine.connect() as con:
         con.execute(text(statement))
         con.commit()
@@ -77,39 +78,14 @@ def read_local_file(file_path: str) -> pd.DataFrame:
         
     return df
 
-def read_minio_file(minio_config: Dict[str, str], minio_path: str) -> pd.DataFrame:
-    """
-    Read and process data from a MinIO bucket.
-    
-    Args:
-        minio_config: Dictionary containing MinIO configuration:
-            {
-                'endpoint': 'minio-server:port',
-                'access_key': 'your-access-key',
-                'secret_key': 'your-secret-key',
-                'bucket': 'your-bucket-name'
-            }
-        minio_path: Path to file in MinIO bucket
-        
-    Returns:
-        pd.DataFrame: Processed data
-        
-    Raises:
-        S3Error: If there's an error accessing the MinIO bucket
-        ValueError: If the file type is not supported
-    """
+
+def read_minio_file(minio_client, minio_bucket, minio_path: str) -> pd.DataFrame:
+
     try:
-        # Initialize MinIO client
-        minio_client = Minio(
-            endpoint=minio_config['endpoint'],
-            access_key=minio_config['access_key'],
-            secret_key=minio_config['secret_key'],
-            secure=False  # Set to False if not using HTTPS
-        )
         
         # Get the object from MinIO
         response = minio_client.get_object(
-            bucket_name=minio_config['bucket'],
+            bucket_name= minio_bucket,
             object_name=minio_path
         )
         
@@ -131,6 +107,7 @@ def read_minio_file(minio_config: Dict[str, str], minio_path: str) -> pd.DataFra
         if 'response' in locals():
             response.close()
             response.release_conn()
+
 
 def list_local_files(directory_path: str, pattern: str = None) -> List[str]:
     """
@@ -157,33 +134,14 @@ def list_local_files(directory_path: str, pattern: str = None) -> List[str]:
 
     return files
 
-def list_minio_files(minio_config: Dict[str, str], prefix: str = "", pattern: str = None) -> List[str]:
-    """
-    List files in a MinIO bucket, optionally filtered by a prefix and pattern.
-    
-    Args:
-        minio_config: Dictionary containing MinIO configuration
-        prefix: Optional prefix to filter files
-        pattern: Optional regex pattern to filter filenames
-        
-    Returns:
-        List[str]: List of file paths in the bucket
-        
-    Raises:
-        S3Error: If there's an error accessing the MinIO bucket
-    """
+
+def list_minio_files(minio_client, minio_bucket, prefix: str = "", pattern: str = None) -> List[str]:
+
     try:
-        # Initialize MinIO client
-        minio_client = Minio(
-            endpoint=minio_config['endpoint'],
-            access_key=minio_config['access_key'],
-            secret_key=minio_config['secret_key'],
-            secure=False
-        )
-        
+       
         # List objects in the bucket
         objects = minio_client.list_objects(
-            bucket_name=minio_config['bucket'],
+            bucket_name= minio_bucket,
             prefix=prefix,
             recursive=True
         )
@@ -326,6 +284,7 @@ def query_all_OD(engine, strain_id):
 
     return selection
     
+    
 def query_growth_rate(engine, experiment_id, strain_id):
     '''
     Queries db for all samples from specified experiment and returns all 
@@ -411,14 +370,48 @@ def get_well_name(row, col):
     return well_name
 
 
+def query_samples_by_name(engine, experiment_id, sample_names):
+    '''
+    Queries db for specified samples from specified experiment and returns
+    media and strain info.  
+    '''
 
 
+    # Check validity of passed arguments
+    db_experiments = pd.read_sql(
+        "SELECT experiment.id FROM experiment", engine
+    )['id'].to_list()
 
+    if (experiment_id not in db_experiments):
+        print(f"Check if experiment and strain are registered in the db.")
+        
+        return None
+        
+    # Hardcoded query. This can be made more flexible later.
+    query = """
+    SELECT 
+        experiment.id,
+        sample.name, sample.parent_sample_name,
+        sample.plate, sample.well,
+        sample.strain_id, strain.long_name,
+        sample.growth_condition_id, growth_condition.carbon_source
 
-
-
-
-
-
+    FROM 
+        experiment
+        INNER JOIN sample ON sample.experiment_id = experiment.id
+        INNER JOIN strain ON strain.id = sample.strain_id
+        INNER JOIN growth_condition ON growth_condition.id = sample.growth_condition_id
+        
+    WHERE 
+        (experiment.id=%(experiment)s) AND (sample.name IN %(sample_names)s)
+    """
     
-    
+    selection = pd.read_sql(
+        query, engine, params={'experiment': experiment_id, 'sample_names': tuple(sample_names)}
+    ).rename(
+        columns={'id': 'experiment_id',
+                 'name': 'sample_name',
+                 'long_name':'strain_name'}
+    )
+
+    return selection
