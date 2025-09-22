@@ -3,15 +3,16 @@ import subprocess
 import tempfile
 from Bio import SeqIO
 import shutil
+from binfo_utils import convert_gbk_to_gff3
 
 
-def map_reads(fwd_reads, rvs_reads, reference, output_dir, keep_index=False, index_dir=None):
+def map_reads(fwd_reads, rvs_reads, reference, output_dir, keep_index=False, index_dir=None, sample_name=None):
     temp_dir = tempfile.mkdtemp()
     if keep_index:
         bt2_index = index_reference(reference, index_dir=index_dir)
     else:
         bt2_index = index_reference(reference, index_dir=temp_dir)
-    sam_file = map_to_indexed_ref(fwd_reads, rvs_reads, bt2_index, output_dir)
+    sam_file = map_to_indexed_ref(fwd_reads, rvs_reads, bt2_index, output_dir, sample_name=sample_name)
     bam_file = sort_and_index_bam(sam_file)
     if temp_dir and os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
@@ -33,9 +34,9 @@ def index_reference(reference: str, index_dir):
     return index
 
 
-def map_to_indexed_ref(fwd_reads, rvs_reads, bowtie2_index, output_dir):
+def map_to_indexed_ref(fwd_reads, rvs_reads, bowtie2_index, output_dir, sample_name='output'):
     print(f"Mapping {fwd_reads} and {rvs_reads} to reference {bowtie2_index}")
-    output_sam = os.path.join(output_dir, 'output.sam')
+    output_sam = os.path.join(output_dir, sample_name + '.sam')
     # bowtie2 expects index prefix without file extension
     cmd = [
         'bowtie2',
@@ -62,3 +63,55 @@ def sort_and_index_bam(sam_file):
     ]
     subprocess.run(cmd_index, check=True)
     return output_bam
+
+
+def run_fadu(bam_file, reference_file, output_dir, fadu_folder=None):
+    
+    temp_dir = None
+
+    if fadu_folder is None:
+        fadu_folder = '/Users/nataschaspahr/code/FADU/'
+
+    reference_file_ext = os.path.splitext(reference_file)[1].lower()
+
+    if reference_file_ext in ['.gb', '.gbk', '.genbank']:
+        temp_dir = tempfile.mkdtemp()
+        gff3 = convert_gbk_to_gff3(reference_file, temp_dir+'/reference.gff3')
+
+    elif reference_file_ext not in ['.gff3', '.gff']:
+        raise ValueError("Reference file must be in GenBank (.gb, .gbk) or GFF3 (.gff3) format.")
+
+    else:
+        gff3 = reference_file
+
+    fadu_cmd = ['julia',
+                f'--project={fadu_folder}/fadu_pkgs',
+                f'{fadu_folder}/fadu.jl',
+                '-M',  # remove multimapping reads
+                '-g', gff3,
+                '-b', bam_file,
+                '-o', output_dir,
+                '-f', 'gene',
+                '-a', 'ID'  # feature name tag in gff3 to use
+                ]
+    
+    print(f"Running FADU with command: {' '.join(fadu_cmd)}")
+    subprocess.run(fadu_cmd, check=True)
+
+    if temp_dir is not None:
+        shutil.rmtree(temp_dir)
+
+    return output_dir
+
+
+def map_and_feature_count(fwd_reads, rvs_reads, reference, output_dir, keep_index=False, index_dir=None, sample_name=None, fadu_folder=None):
+    """
+    Maps reads to a reference and performs feature counting using FADU.
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    bam_file = map_reads(fwd_reads, rvs_reads, reference, output_dir, keep_index=keep_index, index_dir=index_dir, sample_name=sample_name)
+    output_dir = run_fadu(bam_file, reference, output_dir, fadu_folder=fadu_folder)
+
+    return output_dir

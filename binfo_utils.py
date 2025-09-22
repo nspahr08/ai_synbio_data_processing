@@ -2,6 +2,7 @@ import gzip
 from Bio import SeqIO
 from Bio.Seq import Seq
 import os
+import re
 import pandas as pd
 import glob
 import json
@@ -53,16 +54,43 @@ def reverse_complement(seq: str) -> str:
     return complement
 
 
-def parse_illumina_fastq_filename(filename: str) -> tuple:
-    if '/' in filename:
-        filename = os.path.basename(filename)
-    parts = filename.split('_')
-    if len(parts) < 4:
-        raise ValueError("Filename does not contain enough parts to parse.")
-    sample_name = parts[0]
-    lane = parts[2]
-    read = parts[3]
-    return sample_name, lane, read
+def parse_illumina_fastq_filename(filepath: str) -> tuple[str, str]:
+    """
+    Parse an Illumina fastq filename to extract sample name and read direction.
+    Handles both gzipped (.fastq.gz) and non-gzipped (.fastq) files.
+    
+    Args:
+        filepath (str): Path to the fastq file
+            Examples: 
+            - 'Data/Intensities/BaseCalls/SampleName_SampleNameContinued_S1_L001_R1_001.fastq.gz'
+            - 'Data/Intensities/BaseCalls/SampleName_SampleNameContinued_S1_L001_R1_001.fastq'
+    
+    Returns:
+        tuple[str, str]: (sample_name, read)
+            Example: ('SampleName_SampleNameContinued', 'R1')
+            
+    Raises:
+        ValueError: If the filename doesn't match expected Illumina format
+    """
+    
+    # Get just the filename from the path
+    filename = os.path.basename(filepath)
+    
+    # Pattern matches:
+    # - Any characters up to _S\d+ (sample name)
+    # - _S\d+ (sample number)
+    # - _L\d{3} (lane number)
+    # - _(R[12]) (read direction)
+    # - _\d{3} (set number)
+    # - \.fastq(\.gz)? (file extension, optional gz)
+    pattern = r'^(.+)_S\d+_L\d{3}_(R[12])_\d{3}\w*.fastq(?:\.gz)?$'
+    
+    match = re.match(pattern, filename)
+    if not match:
+        raise ValueError(f"Filename {filename} doesn't match expected Illumina format")
+    
+    sample_name, read = match.groups()
+    return sample_name, read
 
 
 def create_manifest(folder: str, platform: str = 'illumina') -> pd.DataFrame:
@@ -71,7 +99,7 @@ def create_manifest(folder: str, platform: str = 'illumina') -> pd.DataFrame:
         files = glob.glob(os.path.join(folder, '*.fastq*'))
         data = []
         for file in files:
-            sample_name, _, read = parse_illumina_fastq_filename(file)
+            sample_name, read = parse_illumina_fastq_filename(file)
             if read == 'R1':
                 data.append({
                     'sample_name': sample_name,
@@ -149,3 +177,28 @@ def json_to_dict(json_path: str) -> dict:
     except json.JSONDecodeError:
         print(f"Error: Could not decode JSON from {json_path}.")
         return {}
+
+
+def convert_gbk_to_gff3(genbank_file, output_file, feature_type='gene'):
+    with open(output_file, 'w') as out:
+        # Write GFF3 header
+        out.write('##gff-version 3\n')
+        
+        for record in SeqIO.parse(genbank_file, 'genbank'):
+            for feature in record.features:
+                if feature.type == feature_type:
+                    strand = '+' if feature.strand == 1 else '-'
+                    start = feature.location.start.position + 1  # GFF is 1-based
+                    end = feature.location.end.position
+                    
+                    # Get feature ID
+                    feature_id = feature.qualifiers.get('locus_tag', [''])[0] or \
+                        feature.qualifiers.get('gene', [''])[0] or \
+                        feature.qualifiers.get('label', [''])[0] or \
+                        f"{record.id}_{start}_{end}"
+                    
+                    # Format GFF3 line
+                    gff_line = f"{record.id}\t.\t{feature.type}\t{start}\t{end}\t.\t{strand}\t.\tID={feature_id}\n"
+                    out.write(gff_line)
+    
+    return output_file
