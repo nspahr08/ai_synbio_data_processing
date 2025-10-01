@@ -129,8 +129,32 @@ def create_manifest(folder: str, platform: str = 'illumina') -> pd.DataFrame:
 
         return manifest.sort_values('sample_name')
 
+    elif platform == 'plasmidsaurus_hybrid':
+        data = []
+        files = glob.glob(os.path.join(folder, '*.fastq.gz'))
+        sample_files = {}
+        for file in files:
+            basename = os.path.basename(file)
+            sample_name = basename.replace('_illumina_R1.fastq.gz', '')\
+                .replace('_illumina_R2.fastq.gz', '')\
+                .replace('_nanopore.fastq.gz', '')\
+                .replace('_illumina_R1_trimmed.fastq.gz', '')\
+                .replace('_illumina_R2_trimmed.fastq.gz', '')\
+                .replace('_nanopore_filtered.fastq.gz', '')
+            if sample_name not in sample_files:
+                sample_files[sample_name] = {'sample_name': sample_name}
+            if file.endswith('_illumina_R1.fastq.gz') or file.endswith('_illumina_R1_trimmed.fastq.gz'):
+                sample_files[sample_name]['fwd_fastq'] = file
+            elif file.endswith('_illumina_R2.fastq.gz') or file.endswith('_illumina_R2_trimmed.fastq.gz'):
+                sample_files[sample_name]['rvs_fastq'] = file
+            elif file.endswith('_nanopore.fastq.gz') or file.endswith('_nanopore_filtered.fastq.gz'):
+                sample_files[sample_name]['nanopore_fastq'] = file
+        data = list(sample_files.values())
+        manifest = pd.DataFrame(data)
+        return manifest.sort_values('sample_name')
+    
     else:
-        raise ValueError("Unsupported platform. Use 'illumina' or 'nanopore'.")
+        raise ValueError("Unsupported platform. Use 'illumina', 'nanopore', or 'plasmidsaurus_hybrid'.")
 
 
 def write_df_to_fasta(df, seq_col, fasta_path, header_col=None):
@@ -179,6 +203,51 @@ def json_to_dict(json_path: str) -> dict:
         return {}
 
 
+def count_string_in_genbank(genbank_file: str, search_string: str) -> int:
+    """
+    Count occurrences of a string in a GenBank file, avoiding double-counting 
+    between CDS and gene features that refer to the same gene.
+
+    Args:
+        genbank_file (str): Path to the GenBank file
+        search_string (str): String to search for
+
+    Returns:
+        int: Number of unique occurrences of the string
+    """
+    count = 0
+    counted_genes = set()  # Keep track of genes we've already counted
+
+    for record in SeqIO.parse(genbank_file, 'genbank'):
+        # First count occurrences in the sequence itself (case-insensitive)
+        sequence = str(record.seq).upper()
+        search_upper = search_string.upper()
+        count += sequence.count(search_upper)
+
+        # Process features
+        for feature in record.features:
+            # Skip if this is a gene feature and we've already counted its CDS
+            if feature.type == 'gene':
+                gene_id = feature.qualifiers.get('gene', [''])[0]
+                if gene_id in counted_genes:
+                    continue
+
+            # Count occurrences in qualifiers
+            for qualifiers in feature.qualifiers.values():
+                for value in qualifiers:
+                    # Handle string qualifiers only
+                    if isinstance(value, str):
+                        count += value.upper().count(search_upper)
+
+            # If this is a CDS, add its gene to the counted set
+            if feature.type == 'CDS':
+                gene_id = feature.qualifiers.get('gene', [''])[0]
+                if gene_id:
+                    counted_genes.add(gene_id)
+
+    return count
+
+
 def convert_gbk_to_gff3(genbank_file, output_file, feature_type='gene'):
     with open(output_file, 'w') as out:
         # Write GFF3 header
@@ -188,17 +257,25 @@ def convert_gbk_to_gff3(genbank_file, output_file, feature_type='gene'):
             for feature in record.features:
                 if feature.type == feature_type:
                     strand = '+' if feature.strand == 1 else '-'
-                    start = feature.location.start.position + 1  # GFF is 1-based
+                    # GFF is 1-based
+                    start = feature.location.start.position + 1
                     end = feature.location.end.position
                     
-                    # Get feature ID
-                    feature_id = feature.qualifiers.get('locus_tag', [''])[0] or \
-                        feature.qualifiers.get('gene', [''])[0] or \
-                        feature.qualifiers.get('label', [''])[0] or \
+                    # Get feature ID, trying different qualifiers
+                    feature_id = (
+                        feature.qualifiers.get('locus_tag', [''])[0] or
+                        feature.qualifiers.get('gene', [''])[0] or
+                        feature.qualifiers.get('label', [''])[0] or
                         f"{record.id}_{start}_{end}"
+                    )
                     
                     # Format GFF3 line
-                    gff_line = f"{record.id}\t.\t{feature.type}\t{start}\t{end}\t.\t{strand}\t.\tID={feature_id}\n"
+                    fields = [
+                        record.id, '.', feature.type,
+                        str(start), str(end), '.',
+                        strand, '.', f"ID={feature_id}"
+                    ]
+                    gff_line = '\t'.join(fields) + '\n'
                     out.write(gff_line)
     
     return output_file

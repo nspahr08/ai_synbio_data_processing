@@ -31,10 +31,11 @@ def make_blast_db(fasta: str, blast_db: str, db_type: str = 'nucl') -> str:
 
 
 def blast_reads(
-        fastq, db, outfmt, output, temp_dir='/Users/nataschaspahr/code/tmp/',
-        num_threads=10, evalue=100
+        fastq, db, output, temp_dir='/Users/nataschaspahr/code/tmp/',
+         outfmt=None, num_threads=10, evalue=100
         ) -> tuple:
-
+    if outfmt is None:
+        outfmt = 'stitle sseqid qseqid pident nident qlen length mismatch gapopen qstart qend sstart send evalue'
     # From fastq files, create temp fasta file
     fasta = os.path.join(
         temp_dir, os.path.basename(fastq).replace('.fastq.gz', '.fasta')
@@ -202,35 +203,123 @@ def plot_feature_counts(counts_df: pd.DataFrame, features: dict,
     else:
         symbol = ''
 
+    # Create PDF with multiple pages, one for each feature
     if out_pdf:
+        pdf = PdfPages(out_pdf)
     
-        with PdfPages(out_pdf) as pdf:
+    for tag in features.keys():
+        feature_counts = counts_df[tag].value_counts().sort_index()
+        feature_counts.index = feature_counts.index.map(str)
+        feature_counts.index = [symbol + i for i in feature_counts.index]
 
-            for tag in features.keys():
+        fig, ax = plt.subplots()
+        plot = ax.bar(feature_counts.index, feature_counts.values)
+        ax.set_ylabel(tag + ' count')
+        ax.bar_label(plot, label_type='center')
+        plt.show()
 
-                feature_counts = counts_df[tag].value_counts().sort_index()
-                feature_counts.index = feature_counts.index.map(str)
-                feature_counts.index = [symbol + i for i in feature_counts.index]
+        if out_pdf:
+            pdf.savefig(fig)
+            plt.close(fig)
 
-                fig, ax = plt.subplots()
-                plot = ax.bar(feature_counts.index, feature_counts.values)
-                ax.set_ylabel(tag + ' count')
-                ax.bar_label(plot, label_type='center')
-                pdf.savefig(fig)
-                plt.show()
-                plt.close(fig)
-
-    else:
-        for tag in features.keys():
-
-            feature_counts = counts_df[tag].value_counts().sort_index()
-            feature_counts.index = feature_counts.index.map(str)
-            feature_counts.index = [symbol + i for i in feature_counts.index]
-
-            fig, ax = plt.subplots()
-            plot = ax.bar(feature_counts.index, feature_counts.values)
-            ax.set_ylabel(tag + ' count')
-            ax.bar_label(plot, label_type='center')
-            plt.show()
+    # Close the PDF file if we created one
+    if out_pdf:
+        pdf.close()
 
     return None
+
+
+def excise_insertion_seq(
+        blast_result_file: str,
+        expect_amplicon_len: int,
+        out_pdf: Optional[str] = None):
+    """
+    Extract insertion sequences from blast results and analyze amplicon counts.
+    
+    Args:
+        blast_result_file: Path to blast results file
+        expect_amplicon_len: Expected length of one amplicon unit
+        out_pdf: Path to save plot as PDF. If None, displays plot instead
+    
+    Returns:
+        DataFrame with insertion sequences and amplicon counts
+    """
+
+    def calc_distance_between_flanks(query_positions: list) -> int:
+        ordered = sorted(query_positions)
+        return ordered[2]-ordered[1]
+
+    results = pd.read_csv(blast_result_file, sep='\t')
+
+    if len(results) == 0:
+        print(f"No hits in {blast_result_file}.")
+        return None
+
+    # Pivot table: qseqid as rows, suffixed columns by left/right
+    pivoted = results.pivot(index='qseqid', columns='sseqid')
+    pivoted.columns = [f'{col[0]}_{col[1]}' for col in pivoted.columns]
+    pivoted = pivoted.reset_index()
+
+    pivoted[['first_boundary', 'second_boundary']] = pivoted.apply(
+        lambda x: pd.Series(get_insert_boundaries(
+            [
+                x['qstart_left_flank'],
+                x['qend_left_flank'],
+                x['qstart_right_flank'],
+                x['qend_right_flank']
+            ]
+            )
+        ), axis=1
+    )
+
+    pivoted['dist_between_flanks'] = pivoted.apply(
+        lambda x: calc_distance_between_flanks(
+            [
+                x['qstart_left_flank'],
+                x['qend_left_flank'],
+                x['qstart_right_flank'],
+                x['qend_right_flank']
+            ]
+        ), axis=1)
+
+    # Extract insertion sequence
+    def get_insertion(row):
+        start = row['first_boundary'] - 1
+        end = row['second_boundary']
+        return row['sequence_left_flank'][start:end]
+    
+    pivoted['insertion_seq'] = pivoted.apply(get_insertion, axis=1)
+
+    # Calculate number of amplicons
+    pivoted['n_amplicons'] = (
+        pivoted['dist_between_flanks'] / expect_amplicon_len
+    )
+
+    # Plot distribution of n_amplicons
+    category_series = categorize_insertion_multiples(pivoted['n_amplicons'])
+    category_counts = category_series.value_counts()
+    category_counts.index = category_counts.index.map(str)
+    category_counts = category_counts.sort_index()
+    # Split and sort indices
+    int_indices = [i for i in category_counts.index if i.isdigit()]
+    str_indices = [i for i in category_counts.index if not i.isdigit()]
+    # Sort numerically and alphabetically
+    sorted_indices = sorted(int_indices, key=int) + sorted(str_indices)
+    # Reindex with sorted order
+    category_counts = category_counts.reindex(sorted_indices)
+
+    fig, ax = plt.subplots()
+    plot = ax.bar(category_counts.index, category_counts.values)
+    ax.set_ylabel('count')
+    ax.bar_label(plot, label_type='center')
+    ax.set_title(os.path.basename(blast_result_file))
+
+    if out_pdf:
+        with PdfPages(out_pdf) as pdf:
+            plt.show()
+            pdf.savefig(fig)
+            plt.close(fig)
+    else:
+        plt.show()
+
+    return pivoted
