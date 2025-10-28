@@ -5,13 +5,28 @@ import os
 def run_breseq(reference, output_dir, *fastq_files, polymorphism_prediction=True, fold_coverage=None):
     """
     Run breseq on given fastq files against a reference genome.
-    If polymorphism_prediction is True, include the --polymorphism-prediction flag.
+    
+    Args:
+        reference: Path to reference genome
+        output_dir: Directory for breseq output
+        *fastq_files: One or more FASTQ files. Can be strings or lists.
+        polymorphism_prediction: Whether to enable polymorphism prediction
+        fold_coverage: Coverage limit for reads
     """
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Flatten fastq_files in case any elements are lists
+    flattened_files = []
+    for item in fastq_files:
+        if isinstance(item, list):
+            flattened_files.extend(item)
+        else:
+            flattened_files.append(item)
+            
     cmd = [
         'breseq',
         '-r', reference,
-    ] + list(fastq_files) + [
+    ] + flattened_files + [
         '--genbank-field-for-seq-id', 'ACCESSION',
         '--output', output_dir,
         '-j', '10'
@@ -25,6 +40,7 @@ def run_breseq(reference, output_dir, *fastq_files, polymorphism_prediction=True
     subprocess.run(cmd, check=True, cwd=output_dir)
 
     return output_dir
+
 
 def run_bam2cov(sample_dir, region):
     bam2cov_dir = os.path.join(sample_dir, 'BAM2COV')

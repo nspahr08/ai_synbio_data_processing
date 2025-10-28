@@ -8,6 +8,8 @@ from minio.error import S3Error
 import re
 from utilities import read_local_file, read_minio_file, list_local_files, list_minio_files, get_well_name
 import numpy as np
+import sys
+sys.path.append('/Users/nataschaspahr/code/amiga')
 from amiga.libs.growth import GrowthPlate
 from amiga.libs.model import GrowthModel
 
@@ -44,6 +46,7 @@ def extract_from_robotic_ALE(
         match = fname_pattern.match(os.path.basename(f))
         
         # Parse info contained in plate reader file name
+        data_row['filename'] = f
         data_row['experiment'] = exp_meta['experiment_id'] if exp_meta else str(match.group('experiment')) 
         data_row['file_ID'] = str(match.group('uniqueID'))
         data_row['timestamp'] = int(match.group('timestamp'))
@@ -52,6 +55,7 @@ def extract_from_robotic_ALE(
         # t_transfer indicates which plate cols were most recently innoculated.
         # data_row['t_transfer'] = int(match.group('transfer'))
         data_row['transfer'] = int(match.group('transfer'))
+        data_row['reading'] = str(match.group('timepoint'))
    
         # Read plate reader file
         if path_to_data is not None:
@@ -80,7 +84,7 @@ def extract_from_robotic_ALE(
     )
     
     # Appending metadata
-    data['filename'] = path_to_data if path_to_data else minio_path_to_data
+    # data['filename'] = path_to_data if path_to_data else minio_path_to_data
     data['measurement_type'] = 'OD'
     data['culture_container'] = 'plate_well'
     data['plate_type'] = exp_meta['plate_type'] if exp_meta else '96_shallow'  # Could be parameterized
@@ -191,17 +195,32 @@ def compute_background(df): #### NOT SURE IF THIS IS CORRECT!!!
     return df
 
 
-def compute_inoculation(df):
+def compute_inoculation(df, first_reading_is_blank=False):
+    """
+    Compute innoculation timestamp based on the oldest timestamp
+    or based on the second oldest timestamp if the first reading
+    was taken before inoculation.
+    Then, using the incoulation timestamp as 0 h reading,
+    compute the timepoint in hours for each timestamp.
+    """
 
-    # Compute innoculation timestamp based on the oldest timestamp
-    # Compute timepoint in hours for each timestamp
+    def inoc_time_function(x):
+        return x.min()
+    
+    if first_reading_is_blank:
+        def inoc_time_function(x):
+            if len(x.drop_duplicates()) == 1:
+                return x.drop_duplicates().iloc[0]
+            else:
+                return x.drop_duplicates().sort_values().iloc[1]
+    
     df['innoculation_timestamp'] = pd.NA
     df.loc[
         ~(pd.isna(df['transfer'])),
         'innoculation_timestamp'
         ] = df.groupby(
             ['series','plate_index', 'transfer']
-            )['datetime'].transform("min")
+            )['datetime'].transform(inoc_time_function)
 
     def calc_timepoint(time_0, time):
         
