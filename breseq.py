@@ -1,5 +1,6 @@
 import subprocess
 import os
+import pandas as pd
 
 
 def run_breseq(reference, output_dir, *fastq_files, polymorphism_prediction=True, fold_coverage=None):
@@ -81,3 +82,43 @@ def compare_gdiff(reference, out_file, gdiffs, format='HTML'):
     subprocess.run(compare_cmd, check=True)
 
     return out_file
+
+
+def count_mutations(sample_dir, count_pols=True, output_file=None):
+
+    if output_file is None:
+        output_file = os.path.join(sample_dir, 'output', 'count.csv')
+
+    data_files = os.listdir(os.path.join(sample_dir, 'data'))
+    input_gd = [x for x in data_files if (x.endswith('.gd') and x != 'annotated.gd')][0]
+
+    count_cmd = [
+        'gdtools', 'COUNT',
+        '-r', os.path.join(sample_dir, 'data', 'reference.fasta'),
+        '-o', output_file,
+        os.path.join(sample_dir, 'data', input_gd)
+
+    ]
+
+    if count_pols:
+        count_cmd.append('-p')
+
+    subprocess.run(count_cmd, check=True)
+
+    count = pd.read_csv(output_file)['total'].iloc[0]
+
+    return count
+
+
+def apply_mutations_to_ref(reference, input_gd, ouput_ref):
+    apply_cmd = [
+        'gdtools', 'APPLY',
+        '-o', ouput_ref,
+        '-f', 'GENBANK',
+        '-r', reference,
+        input_gd
+    ]
+
+    subprocess.run(apply_cmd, check=True)
+
+    return ouput_ref
