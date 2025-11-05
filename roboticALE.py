@@ -13,29 +13,12 @@ from amiga.libs.model import GrowthModel
 
 def extract_from_robotic_ALE(
     path_to_data: str = None,
-    minio_config: dict = None, 
+    minio_client = None, 
+    minio_bucket: str = None,
     minio_path_to_data: str = None,
     exp_meta: dict = None,
     fname_pattern = r'(?P<experiment>\w+)_(?P<timestamp>\d+)_(?P<uniqueID>\w+)_(?P<series>\w+)_(?P<transfer>\d+)_(?P<timepoint>\d+).txt'
 ):
-    """
-    Extracts data from robotic ALE experiments.
-    
-    Args:
-        path_to_data: Path to local directory containing plate reader files
-        minio_config: Dictionary containing MinIO configuration:
-            {
-                'endpoint': 'minio-server:port',
-                'access_key': 'your-access-key',
-                'secret_key': 'your-secret-key',
-                'bucket': 'your-bucket-name'
-            }
-        minio_path_to_data: Path prefix in MinIO bucket containing plate reader files
-        
-    Returns:
-        pd.DataFrame: Raw data containing optical density measurements
-    """
-
     # Initialize data df
     data = pd.DataFrame()
     
@@ -45,10 +28,10 @@ def extract_from_robotic_ALE(
     # Get list of files based on source
     if path_to_data is not None:
         files = list_local_files(path_to_data, pattern=fname_pattern)
-    elif minio_config is not None and minio_path_to_data is not None:
-        files = list_minio_files(minio_config, prefix=minio_path_to_data, pattern=fname_pattern)
+    elif minio_client is not None and minio_path_to_data is not None:
+        files = list_minio_files(minio_client, minio_bucket, prefix=minio_path_to_data, pattern=fname_pattern)
     else:
-        raise ValueError("Either path_to_data or both minio_config and minio_path_to_data must be provided")
+        raise ValueError("Either path_to_data or both minio_client and minio_path_to_data must be provided")
 
     if len(files) == 0:
         print('No files matching specified file name pattern.')
@@ -74,7 +57,7 @@ def extract_from_robotic_ALE(
         if path_to_data is not None:
             plate_data = read_local_file(f)
         else:
-            plate_data = read_minio_file(minio_config, f)
+            plate_data = read_minio_file(minio_client, minio_bucket, f)
 
         # Process plate data
         for row in range(8):
@@ -100,7 +83,7 @@ def extract_from_robotic_ALE(
     data['filename'] = path_to_data if path_to_data else minio_path_to_data
     data['measurement_type'] = 'OD'
     data['culture_container'] = 'plate_well'
-    data['plate_type'] = exp_meta['plate_type'] if exp_meta else'96_shallow'  # Could be parameterized
+    data['plate_type'] = exp_meta['plate_type'] if exp_meta else '96_shallow'  # Could be parameterized
     data['start_date'] = exp_meta['start_date'] if exp_meta else pd.NA
     # data['exp_index'] = self.exp_index
     # data['operation_id'] = self.op_id
@@ -108,24 +91,7 @@ def extract_from_robotic_ALE(
     return data
 
 
-def map_metadata(df, path_to_metadata: str = None, minio_config: str = None, minio_path_to_metadata: str = None):
-    """
-    Maps metadata in layout files to a df containing OD measurements from a robotic ALE experiment.
-    
-    Args:
-        path_to_data: Path to local directory containing plate reader files
-        minio_config: Dictionary containing MinIO configuration:
-            {
-                'endpoint': 'minio-server:port',
-                'access_key': 'your-access-key',
-                'secret_key': 'your-secret-key',
-                'bucket': 'your-bucket-name'
-            }
-        minio_path_to_data: Path prefix in MinIO bucket containing plate layout files
-        
-    Returns:
-        pd.DataFrame: Optical density measurement data and associated metadata.
-    """
+def map_metadata(df, path_to_metadata: str = None, minio_client: str = None, minio_bucket: str = None, minio_path_to_metadata: str = None):
 
     # Load layout files
     
@@ -136,10 +102,10 @@ def map_metadata(df, path_to_metadata: str = None, minio_config: str = None, min
         gc_layout = read_local_file(os.path.join(layout_path, 'growth_condition_layout.csv'))
         transfer_layout = read_local_file(os.path.join(layout_path, 'transfer_layout.csv'))
     else:
-        strain_layout = read_minio_file(minio_config, f"{layout_path}/strain_layout.csv")
-        rep_layout = read_minio_file(minio_config, f"{layout_path}/replicate_layout.csv")
-        gc_layout = read_minio_file(minio_config, f"{layout_path}/growth_condition_layout.csv")
-        transfer_layout = read_minio_file(minio_config, f"{layout_path}/transfer_layout.csv")
+        strain_layout = read_minio_file(minio_client, minio_bucket, f"{layout_path}/strain_layout.csv")
+        rep_layout = read_minio_file(minio_client, minio_bucket, f"{layout_path}/replicate_layout.csv")
+        gc_layout = read_minio_file(minio_client, minio_bucket, f"{layout_path}/growth_condition_layout.csv")
+        transfer_layout = read_minio_file(minio_client, minio_bucket, f"{layout_path}/transfer_layout.csv")
         
     # Apply layouts to df
     df['layout_filename'] = layout_path
@@ -504,19 +470,3 @@ def create_growth_measurements(amiga):
     )
 
     return df
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                                         
-        
