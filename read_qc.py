@@ -51,3 +51,13 @@ def run_nanocomp(files, sample_names, output_dir, threads=10):
         ] + files + ['--names'] + sample_names
 
     subprocess.run(nanocomp_cmd, check=True, cwd=output_dir)
+
+
+def run_multiqc(folder):
+    multiqc_cmd = [
+        'multiqc',
+        folder
+    ]
+    subprocess.run(multiqc_cmd, cwd=folder)
+
+    return os.path.join(folder, 'multiqc_report.html')
