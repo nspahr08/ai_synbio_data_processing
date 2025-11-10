@@ -40,8 +40,22 @@ def run_breseq(reference, output_dir, *fastq_files, polymorphism_prediction=True
     print(f"Running breseq with command: {' '.join(cmd)}")
     subprocess.run(cmd, check=True, cwd=output_dir)
 
-    return output_dir
+    # return output_dir
 
+    # Add #=TITLE sample_name to genome diff file
+    gd_file = os.path.join(output_dir, 'data', 'output.gd')
+    # Read the existing content
+    with open(gd_file, 'r') as f:
+        content = f.readlines()
+    # Add the title line at the beginning
+    title_line = f'#=TITLE\t{os.path.basename(output_dir)}\n'
+    content.insert(0, title_line)
+    # Write back the modified content
+    with open(gd_file, 'w') as f:
+        f.writelines(content)
+
+    return gd_file
+    
 
 def run_bam2cov(sample_dir, region):
     bam2cov_dir = os.path.join(sample_dir, 'BAM2COV')
