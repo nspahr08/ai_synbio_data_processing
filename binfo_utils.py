@@ -279,3 +279,55 @@ def convert_gbk_to_gff3(genbank_file, output_file, feature_type='gene'):
                     out.write(gff_line)
     
     return output_file
+
+
+def create_breseq_manifest(
+        path_to_library,
+        breseq_param,
+        lib_type="Illumina"
+    ):
+    """
+    Create a manifest for breseq results.
+
+    Args:
+        path_to_library (str): Path to the library folder (without lib_type/breseq).
+        breseq_param (str): Name of the breseq subfolder (e.g. 'breseq_ADP1_pop').
+        lib_type (str): Library type, i.e. 'Illumina' or 'Nanopore'
+
+    Returns:
+        pd.DataFrame: DataFrame with columns [library, breseq_param, sample_name, path_to_gdiff]
+    """
+    # 1. Check if breseq_param folder exists
+    breseq_folder = os.path.join(path_to_library, f"{os.path.basename(path_to_library)}_{lib_type}", "breseq", breseq_param)
+    if not os.path.isdir(breseq_folder):
+        print(f"Error: breseq folder not found at {breseq_folder}")
+        return None
+
+    # 2. Collect all subfolders as sample_names
+    sample_names = [
+        name for name in os.listdir(breseq_folder)
+        if os.path.isdir(os.path.join(breseq_folder, name))
+    ]
+    if not sample_names:
+        print(f"Error: No sample subfolders found in {breseq_folder}")
+        return None
+
+    # 3. Check for output.gd in each sample's data/ subfolder
+    manifest_rows = []
+    for sample in sample_names:
+        gdiff_path = os.path.join(breseq_folder, sample, "data", "output.gd")
+        if not os.path.isfile(gdiff_path):
+            print(f"Error: output.gd not found for sample '{sample}' at {gdiff_path}")
+            continue
+        manifest_rows.append({
+            "library": os.path.basename(path_to_library),
+            "breseq_param": breseq_param,
+            "sample_name": sample,
+            "path_to_gdiff": gdiff_path
+        })
+
+    if not manifest_rows:
+        print("Error: No valid samples with output.gd found.")
+        return None
+
+    return pd.DataFrame(manifest_rows)
