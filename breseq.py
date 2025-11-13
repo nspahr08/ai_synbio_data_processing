@@ -98,19 +98,16 @@ def compare_gdiff(reference, out_file, gdiffs, format='HTML'):
     return out_file
 
 
-def count_mutations(sample_dir, count_pols=True, output_file=None):
+def count_mutations(path_to_gdiff, count_pols=True, output_file=None):
 
     if output_file is None:
-        output_file = os.path.join(sample_dir, 'output', 'count.csv')
-
-    data_files = os.listdir(os.path.join(sample_dir, 'data'))
-    input_gd = [x for x in data_files if (x.endswith('.gd') and x != 'annotated.gd')][0]
+        output_file = os.path.join(os.path.dirname(path_to_gdiff), 'count.csv')
 
     count_cmd = [
         'gdtools', 'COUNT',
-        '-r', os.path.join(sample_dir, 'data', 'reference.fasta'),
+        '-r', os.path.join(os.path.dirname(path_to_gdiff), 'reference.fasta'),
         '-o', output_file,
-        os.path.join(sample_dir, 'data', input_gd)
+        path_to_gdiff
 
     ]
 
