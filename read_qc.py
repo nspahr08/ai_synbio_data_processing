@@ -13,6 +13,28 @@ def run_fastqc(path_to_file):
     subprocess.run(fastqc_cmd, check=True, cwd=output_dir)
 
 
+def run_fastp(path_to_fwd, path_to_rev):
+    output_dir = os.path.dirname(path_to_fwd)
+    # Make sure that base file name for R1 and R2 are the same
+    # otherwise, use R1 base name, but print a warning
+    output_name_fwd = path_to_fwd.split('_R1')[0]
+    output_name_rev = path_to_rev.split('_R2')[0]
+    if output_name_fwd != output_name_rev:
+        print("Warning: R1 and R2 file names do not match. Using R1 base name for output.")
+    
+    fastp_cmd = [
+        'fastp',
+        '-i', path_to_fwd,
+        '-I', path_to_rev,
+        '-w', '10',
+        '-j', os.path.join(output_dir, output_name_fwd + '_fastp.json'),
+        '-h', os.path.join(output_dir, output_name_fwd + '_fastp.html')
+    ]
+
+    print(f"Running fastp on {output_name_fwd}")
+    subprocess.run(fastp_cmd, check=True, cwd=output_dir)
+
+
 def run_filtlong(input_fastq, output_dir, min_length=1000, keep_percent=90):
     outfile = os.path.basename(input_fastq).replace('.fastq.gz', '_filtered.fastq.gz')
     outfile_path = os.path.join(output_dir, outfile)
@@ -53,11 +75,13 @@ def run_nanocomp(files, sample_names, output_dir, threads=10):
     subprocess.run(nanocomp_cmd, check=True, cwd=output_dir)
 
 
-def run_multiqc(folder):
+def run_multiqc(folder, output_dir=None):
     multiqc_cmd = [
         'multiqc',
-        folder
+        folder,
+        '--force'
     ]
-    subprocess.run(multiqc_cmd, cwd=folder)
+    output_dir = folder if output_dir is None else output_dir
+    subprocess.run(multiqc_cmd, cwd=output_dir)
 
     return os.path.join(folder, 'multiqc_report.html')
