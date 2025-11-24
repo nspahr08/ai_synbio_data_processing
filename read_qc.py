@@ -13,6 +13,7 @@ def run_fastqc(path_to_file, threads=10):
     subprocess.run(fastqc_cmd, check=True, cwd=output_dir)
 
 
+<<<<<<< HEAD
 def run_fastp(path_to_fwd, path_to_rev, path_to_fwd_out, path_to_rev_out, threads=10):
     # Make sure that base file name for R1 and R2 are the same
     # otherwise, use R1 base name, but print a warning
@@ -21,19 +22,37 @@ def run_fastp(path_to_fwd, path_to_rev, path_to_fwd_out, path_to_rev_out, thread
     if output_name_fwd != output_name_rev:
         print("Warning: R1 and R2 file names do not match. Using R1 base name for output.")
     output_dir = os.path.dirname(output_name_fwd)
+=======
+def run_fastp(path_to_fwd, path_to_rev):
+    output_dir = os.path.dirname(path_to_fwd)
+    # Make sure that base file name for R1 and R2 are the same
+    # otherwise, use R1 base name, but print a warning
+    output_name_fwd = path_to_fwd.split('_R1')[0]
+    output_name_rev = path_to_rev.split('_R2')[0]
+    if output_name_fwd != output_name_rev:
+        print("Warning: R1 and R2 file names do not match. Using R1 base name for output.")
+>>>>>>> 398ddf768de14916e41ac23eb0d109288ea0ce34
     
     fastp_cmd = [
         'fastp',
         '-i', path_to_fwd,
         '-I', path_to_rev,
+<<<<<<< HEAD
         '-o', path_to_fwd_out,
         '-O', path_to_rev_out,
         '-w', str(threads),
+=======
+        '-w', '10',
+>>>>>>> 398ddf768de14916e41ac23eb0d109288ea0ce34
         '-j', os.path.join(output_dir, output_name_fwd + '_fastp.json'),
         '-h', os.path.join(output_dir, output_name_fwd + '_fastp.html')
     ]
 
+<<<<<<< HEAD
     print(f"Running fastp on {path_to_fwd} and {path_to_rev}")
+=======
+    print(f"Running fastp on {output_name_fwd}")
+>>>>>>> 398ddf768de14916e41ac23eb0d109288ea0ce34
     subprocess.run(fastp_cmd, check=True, cwd=output_dir)
 
 
