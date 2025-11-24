@@ -3,7 +3,7 @@ import os
 import pandas as pd
 
 
-def run_breseq(reference, output_dir, *fastq_files, polymorphism_prediction=True, fold_coverage=None):
+def run_breseq(reference, output_dir, *fastq_files, polymorphism_prediction=True, fold_coverage=None, threads=10):
     """
     Run breseq on given fastq files against a reference genome.
     
@@ -30,7 +30,7 @@ def run_breseq(reference, output_dir, *fastq_files, polymorphism_prediction=True
     ] + flattened_files + [
         '--genbank-field-for-seq-id', 'ACCESSION',
         '--output', output_dir,
-        '-j', '10'
+        '-j', str(threads)
     ]
     if polymorphism_prediction:
         cmd.append('--polymorphism-prediction')

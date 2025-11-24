@@ -31,8 +31,8 @@ def make_blast_db(fasta: str, blast_db: str, db_type: str = 'nucl') -> str:
 
 
 def blast_reads(
-        fastq, db, output, temp_dir='/Users/nataschaspahr/code/tmp/',
-         outfmt=None, num_threads=10, evalue=100
+        fastq, db, output, temp_dir='/storage/nspahr/tmp/',
+         outfmt=None, num_threads=64, evalue=100
         ) -> tuple:
     if outfmt is None:
         outfmt = 'stitle sseqid qseqid pident nident qlen length mismatch gapopen qstart qend sstart send evalue'
@@ -43,33 +43,40 @@ def blast_reads(
     with gzip.open(fastq, "rt") as fastq_in, open(fasta, "w") as fasta_out:
         SeqIO.convert(fastq_in, "fastq", fasta_out, "fasta")
 
-    # Create blast results from fasta
-    blast_cmd = [
-        'blastn',
-        '-db', db,
-        '-query', fasta,
-        '-out', output,
-        '-num_threads', str(num_threads),
-        '-evalue', str(evalue),
-        '-outfmt', f'6 {outfmt}'
-    ]
+    try:
+        # Create blast results from fasta
+        try:
+            blast_cmd = [
+                'blastn',
+                '-db', db,
+                '-query', fasta,
+                '-out', output,
+                '-num_threads', str(num_threads),
+                '-evalue', str(evalue),
+                '-outfmt', f'6 {outfmt}'
+            ]
+            print(' '.join(blast_cmd))
+            subprocess.run(blast_cmd, check=True, cwd=os.path.dirname(output))
+        except:
+            os.remove(output)
+            
+        results = pd.read_csv(output, sep='\t', names=outfmt.split(' '))
     
-    subprocess.run(blast_cmd, check=True, cwd=os.path.dirname(output))
-
-    results = pd.read_csv(output, sep='\t', names=outfmt.split(' '))
-
-    # Add read seq and overwrite tsv
-    get_seqs = read_fasta_into_df(fasta)
-    results = pd.merge(
-        get_seqs, results, left_on='seq_id', right_on='qseqid', how='inner'
-        )
-    results.to_csv(output, sep='\t', index=False)
-
-    # Delete temp fasta file
-    os.remove(fasta)
-
-    print(f"BLAST results saved to {output}")
-    return (output, results)
+        # Add read seq and overwrite tsv
+        get_seqs = read_fasta_into_df(fasta)
+        results = pd.merge(
+            get_seqs, results, left_on='seq_id', right_on='qseqid', how='inner'
+            )
+        results.to_csv(output, sep='\t', index=False)
+        print(f"BLAST results saved to {output}")
+    
+        # Delete temp fasta file
+        os.remove(fasta)
+    
+        return (output, results)
+    except:
+        os.remove(fasta)
+        raise
 
 
 def get_insert_boundaries(query_positions: list) -> tuple:
