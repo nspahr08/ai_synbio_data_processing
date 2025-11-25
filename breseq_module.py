@@ -21,7 +21,7 @@ import base64
 
 def _get_ref_genomes_path() -> str:
     """Get REF_GENOMES path from environment variable or use default."""
-    return os.environ.get('REF_GENOMES', '/Users/nataschaspahr/Reference_DBs/genomes')
+    return os.environ.get('REF_GENOMES', '/storage/synbio/ai_synbio_data/reference_data/genomes')
 
 
 def _convert_param_name_to_python(name: str) -> str:
@@ -241,24 +241,13 @@ class Breseq_params:
         ref_path = ref_genomes_path / ref_file
         if not ref_path.exists():
             raise FileNotFoundError(
-                f"Reference file '{ref}' not found in REF_GENOMES directory: {ref_genomes_path}"
+                f"Reference file '{ref_file}' not found in REF_GENOMES directory: {ref_genomes_path}"
             )
 
     def __setattr__(self, name: str, value):
         """Intercept setting of `reference` to validate existence.
-
-        Accepts either a string or a single-item list. Enforces exactly one
-        reference. Other attributes are set normally.
         """
         if name == 'reference' and value is not None:
-            # Allow passing a single-item list or a string
-            if isinstance(value, list):
-                if len(value) != 1:
-                    raise ValueError(
-                        'Only a single reference is supported; multiple were provided'
-                    )
-                value = value[0]
-            # Validate that the named file exists in REF_GENOMES
             self._validate_reference(value)
         super().__setattr__(name, value)
     
@@ -1360,7 +1349,7 @@ class Breseq:
             (or None if not available).
         """
         # Only consider the run's main genome-diff file: data/output.gd
-        gd_path = Path(self.output_folder) / 'data' / 'annotated.gd'
+        gd_path = Path(self.output_folder) / 'data' / 'output.gd'
         if not gd_path.exists():
             raise FileNotFoundError(f"Could not find data/output.gd in {self.output_folder}")
 
