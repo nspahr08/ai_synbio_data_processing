@@ -12,6 +12,7 @@ import json
 import hashlib
 import subprocess
 import shlex
+import time
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
 import csv
@@ -642,10 +643,8 @@ class Breseq:
         if not log_path.exists():
             raise FileNotFoundError(f"Could not find log.txt in {output_folder}")
         
-        # Find summary.json
-        summary_path = output_folder / 'output' / 'summary.json'
-        if not summary_path.exists():
-            summary_path = output_folder / 'summary.json'
+        # summary.json is stored under data/ for this run
+        summary_path = output_folder / 'data' / 'summary.json'
         
         # Parse parameters
         params = cls._parse_params_from_log(log_path)
@@ -670,6 +669,14 @@ class Breseq:
         breseq.exists = True
         # Initialize per-instance cache for region coverage
         breseq.region_average_cov = {}
+
+        # Average coverage for the run's reference (populated from data/summary.json)
+        breseq.avg_coverage = None
+        try:
+            breseq._load_avg_coverage()
+        except Exception:
+            # Non-fatal if summary.json is missing or malformed
+            pass
 
         return breseq
     
@@ -1143,6 +1150,58 @@ class Breseq:
         
         # Last resort: return parent of output_folder
         return str(output_folder.parent)
+
+    def _load_avg_coverage(self) -> Optional[float]:
+        """Load average coverage for the run's reference from data/summary.json.
+
+        Assumptions:
+        - summary.json always lives at <run>/data/summary.json
+        - There is only one reference entry under
+          summary['references']['reference']; take the first entry's
+          'coverage_average' value without attempting to match keys.
+
+        Sets self.avg_coverage to the parsed float or None and returns it.
+        """
+        summary_path = Path(self.output_folder) / 'data' / 'summary.json'
+        if not summary_path.exists():
+            self.avg_coverage = None
+            return None
+
+        try:
+            with open(summary_path, 'r') as fh:
+                summary = json.load(fh)
+        except Exception:
+            self.avg_coverage = None
+            return None
+
+        refs = summary.get('references')
+        if not isinstance(refs, dict):
+            self.avg_coverage = None
+            return None
+
+        ref_block = refs.get('reference')
+        if not isinstance(ref_block, dict) or len(ref_block) == 0:
+            self.avg_coverage = None
+            return None
+
+        first_entry = next(iter(ref_block.values()))
+        if not isinstance(first_entry, dict):
+            self.avg_coverage = None
+            return None
+
+        cov = first_entry.get('coverage_average')
+        if cov is None:
+            self.avg_coverage = None
+            return None
+
+        try:
+            cov_val = float(cov)
+        except Exception:
+            self.avg_coverage = None
+            return None
+
+        self.avg_coverage = cov_val
+        return cov_val
     
     def run(self, overwrite: bool = False):
         """Run breseq with the configured parameters.
@@ -1182,25 +1241,40 @@ class Breseq:
         
         # Run breseq
         try:
-            result = subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            self.exists = True
-
-            # Add #=TITLE sample_name to genome diff file
-            gd_file = os.path.join(str(self.output_folder), 'data', 'output.gd')
-            # Read the existing content
-            with open(gd_file, 'r') as f:
-                content = f.readlines()
-            # Add the title line at the beginning
-            title_line = f'#=TITLE\t{os.path.basename(output_dir)}\n'
-            content.insert(0, title_line)
-            # Write back the modified content
-            with open(gd_file, 'w') as f:
-                f.writelines(content)
+                # Time only the subprocess.run call (wall-clock) so users can
+                # inspect how long breseq itself took vs Python-side overhead.
+                start = time.perf_counter()
+                try:
+                    subprocess.run(
+                        cmd,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    elapsed = time.perf_counter() - start
+                    # Attach timing (in minutes) to object for later inspection
+                    self.breseq_subprocess_time_minutes = elapsed / 60.0
+                    self.exists = True
+                except subprocess.CalledProcessError as e:
+                    elapsed = time.perf_counter() - start
+                    # Still record elapsed time even on failure (minutes)
+                    self.breseq_subprocess_time_minutes = elapsed / 60.0
+                    raise RuntimeError(
+                        f"Breseq command failed with return code {e.returncode}.\n"
+                        f"Command: {' '.join(cmd)}\n"
+                        f"Error output: {e.stderr}"
+                    ) from e
+                # Add #=TITLE sample_name to genome diff file
+                gd_file = os.path.join(str(self.output_folder), 'data', 'output.gd')
+                # Read the existing content
+                with open(gd_file, 'r') as f:
+                    content = f.readlines()
+                # Add the title line at the beginning
+                title_line = f'#=TITLE\t{os.path.basename(output_dir)}\n'
+                content.insert(0, title_line)
+                # Write back the modified content
+                with open(gd_file, 'w') as f:
+                    f.writelines(content)
 
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
@@ -1553,4 +1627,3 @@ class Breseq:
             self.applied_gd_path = str(applied_gd)
 
         return str(out_path)
-
