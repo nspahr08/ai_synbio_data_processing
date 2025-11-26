@@ -19,10 +19,23 @@ import csv
 import zlib
 import base64
 
-
 def _get_ref_genomes_path() -> str:
-    """Get REF_GENOMES path from environment variable or use default."""
-    return os.environ.get('REF_GENOMES', '/storage/synbio/ai_synbio_data/reference_data/genomes')
+    """Get REF_GENOMES path from config.json file."""
+    config_path = Path(__file__).parent / "config.json"
+    # Load configuration
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+        ref_genomes_path = config['REF_GENOMES']
+    return ref_genomes_path
+
+def _get_libraries_path() -> str:
+    """Get LIB_DIR path from config.json file."""
+    config_path = Path(__file__).parent / "config.json"
+    # Load configuration
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+        lib_dir_path = config['LIB_DIR']
+    return lib_dir_path
 
 
 def _convert_param_name_to_python(name: str) -> str:
@@ -81,17 +94,15 @@ class Breseq_params:
     
     Required parameters:
         - reference: Reference genome file from REF_GENOMES folder
-        - num_processors (int): Number of processors
         - polymorphism_prediction (bool): Whether to use polymorphism mode
     
     All other parameters are optional with defaults from breseq documentation.
     """
     
     # Required parameters
-    REQUIRED_PARAMS = ['reference', 'num_processors', 'polymorphism_prediction']
+    REQUIRED_PARAMS = ['reference', 'polymorphism_prediction']
     
     def __init__(self, reference: str,
-                 num_processors: int,
                  polymorphism_prediction: bool,
                  **kwargs):
         """Initialize Breseq_params.
@@ -101,7 +112,6 @@ class Breseq_params:
         
         Args:
             reference: Reference genome filename (must be in REF_GENOMES)
-            num_processors: Number of processors to use
             polymorphism_prediction: Whether to use polymorphism mode (True/False)
             **kwargs: Any other breseq parameters
         """
@@ -109,7 +119,6 @@ class Breseq_params:
 
         # Set required parameters
         self.reference = reference
-        self.num_processors = num_processors
         self.polymorphism_prediction = polymorphism_prediction
         
         # Set optional parameters with defaults
@@ -126,6 +135,7 @@ class Breseq_params:
         """Set default values for all optional parameters."""
         # Basic options
         self.name = None  # -n, DEFAULT=<none>
+        self.num_processors = 24  # -j,--num-processors, DEFAULT=24
         
         # Read file options
         self.limit_fold_coverage = 0  # -l, DEFAULT=OFF
@@ -348,9 +358,6 @@ def _encoded_version_name_to_params(version_name: str, prefix: str = 'breseq_par
         if getattr(self, 'reference', None):
             args.extend(['-r', os.path.join(self._ref_genomes_path, self.reference)])
         
-        # -j num_processors
-        args.extend(['-j', str(self.num_processors)])
-        
         # -p polymorphism_prediction (flag)
         if self.polymorphism_prediction:
             args.append('-p')
@@ -359,6 +366,10 @@ def _encoded_version_name_to_params(version_name: str, prefix: str = 'breseq_par
         # -n name
         if self.name is not None and self.name:
             args.extend(['-n', self.name])
+
+        # -j num_processors
+        if self.num_processors != 24:
+            args.extend(['-j', str(self.num_processors)])
         
         # Read file options
         if self.limit_fold_coverage > 0:
@@ -618,7 +629,7 @@ class Breseq:
         self.reference_path = Path(_get_ref_genomes_path()) / self.params.reference
         
         # Compute output folder
-        self.output_folder = self.sample_path / 'breseq' / self.params.version_name
+        self.output_folder = Path(self.sample_path).parent / 'breseq' / self.params.version_name
         self.exists = self.output_folder.exists() and (self.output_folder / 'output' / 'output.done').exists()
         # Per-instance cache of region average coverage values
         # Key: region string (e.g., "NC_005966:1-1000") -> float or None
