@@ -305,11 +305,50 @@ class Breseq_params:
     
     @property
     def version_name(self) -> str:
-        """Get version name based on parameter hash."""
-        # Use a reversible, self-contained encoding of the params so the
-        # version name can be decoded back to the original params.
+        """Get version name as a short unique hash based on params.
+
+        Returns a short hash (first 10 hex chars of SHA-256). Full params
+        are recorded in a registry file in the sample_path for recovery.
+        """
         params_dict = self._get_all_params_dict()
-        return _params_to_encoded_version_name(params_dict)
+        # Sort by key for consistent hashing
+        sorted_params = sorted(params_dict.items())
+        # Convert to string representation
+        params_str = json.dumps(sorted_params, sort_keys=True)
+        # Generate hash
+        hash_obj = hashlib.sha256(params_str.encode())
+        # Return first 10 characters of hex digest (unique and short)
+        return 'breseq_' + hash_obj.hexdigest()[:10]
+
+    def _get_registry_path(self) -> Path:
+        """Get the registry file path: <sample_path>/.breseq_params_registry.json"""
+        return Path(self.sample_path) / '.breseq_params_registry.json'
+
+    def _load_registry(self) -> Dict[str, Any]:
+        """Load registry from disk. Returns empty dict if not yet created."""
+        registry_path = self._get_registry_path()
+        if not registry_path.exists():
+            return {}
+        try:
+            with open(registry_path, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_registry(self, registry: Dict[str, Any]) -> None:
+        """Save registry to disk."""
+        registry_path = self._get_registry_path()
+        with open(registry_path, 'w') as f:
+            json.dump(registry, f, indent=2)
+
+    def _update_registry(self) -> None:
+        """Add/update current params in the registry with the current version_name hash."""
+        version_hash = self.version_name
+        params_dict = self.params._get_all_params_dict()
+        registry = self._load_registry()
+        # Store the hash -> params mapping
+        registry[version_hash] = params_dict
+        self._save_registry(registry)
 
 
 def _params_to_encoded_version_name(params: Dict[str, Any], prefix: str = 'breseq_params_') -> str:
@@ -634,6 +673,9 @@ class Breseq:
         # Per-instance cache of region average coverage values
         # Key: region string (e.g., "NC_005966:1-1000") -> float or None
         self.region_average_cov = {}
+        
+        # Update the registry with this version_name and params
+        self._update_registry()
     
     @classmethod
     def from_existing(cls, output_folder: Union[str, Path]) -> 'Breseq':
@@ -688,6 +730,9 @@ class Breseq:
         except Exception:
             # Non-fatal if summary.json is missing or malformed
             pass
+
+        # Update the registry with this params mapping
+        breseq._update_registry()
 
         return breseq
     
